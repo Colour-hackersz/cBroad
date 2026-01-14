@@ -2,7 +2,7 @@ const { Telegraf, Markup, session, Scenes } = require('telegraf');
 const axios = require('axios');
 const { BaseScene, Stage } = Scenes;
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8598147501:AAGMKtdlRZnMnSWGBQe-Vu7OfjS5_aFM9hI";
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8510056801:AAGBHGfy-tGSUh7df9CDYGVENsLfzEz2Jhc";
 if (!BOT_TOKEN) process.exit(1);
 
 const bot = new Telegraf(BOT_TOKEN);
