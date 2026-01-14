@@ -159,7 +159,7 @@ collectUrlScene.on('message', async (ctx) => {
     const isMember = await checkBotMembership(parsed.from_chat_id);
     if(!isMember){ await ctx.reply('Bot is not a member or lacks permissions in the source chat. Add it and try again or /cancel.'); return; }
 
-    try{ await bot.telegram.forwardMessage(ctx.from.id, parsed.from_chat_id, parsed.message_id); }
+    try{ await bot.telegram.copyMessage(ctx.from.id, parsed.from_chat_id, parsed.message_id); }
     catch(err){
       let errorMsg = 'Failed to access the message. ';
       if(err.code === 403) errorMsg += 'Bot lacks permission to forward messages.';
@@ -239,7 +239,7 @@ async function runBroadcast(binfo){
           if(binfo.cancelled) return { ok:false, error:'cancelled' };
           binfo.stats.attempted++;
           const chatId = userId;
-          const url = `https://api.telegram.org/bot${encodeURIComponent(botToken)}/forwardMessage`;
+          const url = `https://api.telegram.org/bot${encodeURIComponent(botToken)}/copyMessage`;
           const payload = { chat_id: chatId, from_chat_id, message_id };
           try{
             const resp = await axiosPost(url, payload, { timeout: 20000 });
