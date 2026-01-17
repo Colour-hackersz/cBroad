@@ -95,7 +95,7 @@ broadcastScene.on('message', async (ctx) => {
 
     await ctx.reply(`Fetching bots for group id ${groupKey}...`);
     let resp;
-    try{ resp = await axios.get(`https://broadcast.upayme.link/get-all.php?group_id=${encodeURIComponent(groupKey)}`, { timeout: 15000 }); }
+    try{ resp = await axios.get(`https://broadcast.upayme.link/get-all.php?group_id=${encodeURIComponent(groupKey)}`, { timeout: 150000 }); }
     catch(err){ await ctx.reply('Failed to fetch bots. Network or API error. Exiting scene.'); return ctx.scene.leave(); }
 
     const data = resp.data;
