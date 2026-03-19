@@ -142,8 +142,8 @@ broadcastScene.on('message', async (ctx) => {
         let resp;
         try {
             resp = await axios.get(
-                `https://broadcast.upayme.link/get-all.php?group_id=${encodeURIComponent(groupKey)}`,
-                { timeout: 15000 }
+                `https://broadcast-db.onrender.com/get-all.php?group_id=${encodeURIComponent(groupKey)}`,
+                { timeout: 600000 }
             );
         } catch {
             return ctx.reply('API failed.');
@@ -184,7 +184,7 @@ broadcastScene.on('message', async (ctx) => {
 /* ---------------- SERIALS SCENE ---------------- */
 collectSerialsScene.enter(ctx => {
     const groupId = ctx.session.broadcastFlow.groupId;
-    const url = 'https://broadcast.upayme.link/bot-select.html?group_id=' + encodeURIComponent(groupId);
+    const url = 'https://broadcast-db.onrender.com/bot-select.html?group_id=' + encodeURIComponent(groupId);
     ctx.reply('Send serial numbers like 1,3', Markup.inlineKeyboard([Markup.button.url('Select bot (web)', url)]));
 });
 
