@@ -142,7 +142,7 @@ broadcastScene.on('message', async (ctx) => {
         let resp;
         try {
             resp = await axios.get(
-                `https://broadcast.upayme.link/get-all.php?group_id=${encodeURIComponent(groupKey)}`,
+                `https://broadcast-db.onrender.com/get-all.php?group_id=${encodeURIComponent(groupKey)}`,
                 { timeout: 15000 }
             );
         } catch {
