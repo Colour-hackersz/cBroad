@@ -4,7 +4,7 @@ const express = require("express");
 const { BaseScene, Stage } = Scenes;
 
 /* ---------------- BOT TOKEN ---------------- */
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "YOUR_TOKEN";
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8662842894:AAFfSklFWQCDkCVV-u4ktn2VsraU4DF6ECc";
 if (!BOT_TOKEN) process.exit(1);
 
 const bot = new Telegraf(BOT_TOKEN);
