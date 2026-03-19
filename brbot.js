@@ -4,180 +4,172 @@ const express = require("express");
 const { BaseScene, Stage } = Scenes;
 
 /* ---------------- BOT TOKEN ---------------- */
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8662842894:AAFfSklFWQCDkCVV-u4ktn2VsraU4DF6ECc";
-if (!BOT_TOKEN) process.exit(1);
+const BOT_TOKEN = "8662842894:AAFfSklFWQCDkCVV-u4ktn2VsraU4DF6ECc";
 
 const bot = new Telegraf(BOT_TOKEN);
 
-/* ---------------- KEEP RENDER ALIVE ---------------- */
+/* ---------------- KEEP ALIVE ---------------- */
 const app = express();
 app.get("/", (req, res) => res.send("Broadcast Bot Running"));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT);
 
-// 🔥 SELF PINGER (every 4 minutes)
-setInterval(async () => {
-    try {
-        await axios.get(`http://localhost:${PORT}`);
-    } catch {}
+// self ping
+setInterval(() => {
+axios.get("http://localhost:${PORT}").catch(()=>{});
 }, 240000);
 
-/* ---------------- STATE ---------------- */
-const runningByGroup = new Map();
-const runningByUser = new Map();
-
-const GLOBAL_MAX_CONCURRENCY = 50;
-const BATCH_SIZE = 39;
-const BATCH_PAUSE_MS = 200;
-
 /* ---------------- HELPERS ---------------- */
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-/* ---------------- SEMAPHORE ---------------- */
-class Semaphore {
-    constructor(max) {
-        this.max = max;
-        this.current = 0;
-        this.queue = [];
-    }
-    async acquire() {
-        if (this.current < this.max) {
-            this.current++;
-            return () => this.release();
-        }
-        return await new Promise(resolve => this.queue.push(resolve));
-    }
-    release() {
-        this.current--;
-        if (this.queue.length > 0) {
-            this.current++;
-            const next = this.queue.shift();
-            next(() => this.release());
-        }
-    }
-}
-const globalSemaphore = new Semaphore(GLOBAL_MAX_CONCURRENCY);
-
-// 🔥 SAFE POST WITH RETRY + FLOOD WAIT
-async function safeSend(url, payload, retry = 1) {
-    const release = await globalSemaphore.acquire();
-    try {
-        const res = await axios.post(url, payload, { timeout: 20000 });
-        release();
-        return res.data.ok;
-    } catch (err) {
-        release();
-
-        // 🔥 FloodWait handling
-        if (err.response?.data?.parameters?.retry_after) {
-            const wait = err.response.data.parameters.retry_after * 1000;
-            await sleep(wait);
-            return safeSend(url, payload, retry);
-        }
-
-        // 🔥 Retry once
-        if (retry > 0) {
-            await sleep(1000);
-            return safeSend(url, payload, retry - 1);
-        }
-
-        return false;
-    }
+function parseTgUrl(url){
+const m = String(url).match(/t.me/c/(\d+)/(\d+)/);
+if(!m) return null;
+return { from_chat_id: "-100"+m[1], message_id: parseInt(m[2]) };
 }
 
-/* ---------------- BROADCAST ENGINE ---------------- */
-async function runBroadcast(binfo) {
-    const { groupId, initiatorId, selectedBots, parsedFrom } = binfo;
-    const { from_chat_id, message_id } = parsedFrom;
-
-    try {
-        for (const botObj of selectedBots) {
-            if (binfo.cancelled) break;
-
-            const users = botObj.users || [];
-
-            for (const userId of users) {
-                if (binfo.cancelled) break;
-
-                binfo.stats.attempted++;
-
-                const url = `https://api.telegram.org/bot${botObj.bot_token}/forwardMessage`;
-                const payload = { chat_id: userId, from_chat_id, message_id };
-
-                const ok = await safeSend(url, payload);
-
-                if (ok) binfo.stats.success++;
-                else binfo.stats.failed++;
-
-                // 🔥 LIVE PROGRESS UPDATE every 100 users
-                if (binfo.stats.attempted % 100 === 0) {
-                    try {
-                        await bot.telegram.sendMessage(
-                            initiatorId,
-                            `📊 Progress:\nSent: ${binfo.stats.attempted}\nSuccess: ${binfo.stats.success}\nFailed: ${binfo.stats.failed}`
-                        );
-                    } catch {}
-                }
-
-                await sleep(50);
-            }
-        }
-    } finally {
-        const end = Date.now();
-
-        const summary =
-            `Broadcast Summary:\n` +
-            `Bots: ${binfo.stats.totalBots}\n` +
-            `Users: ${binfo.stats.totalUsers}\n` +
-            `Attempted: ${binfo.stats.attempted}\n` +
-            `Success: ${binfo.stats.success}\n` +
-            `Failed: ${binfo.stats.failed}\n` +
-            `Time: ${Math.round((end - binfo.startTime) / 1000)}s`;
-
-        try {
-            await bot.telegram.sendMessage(initiatorId, summary);
-        } catch {}
-
-        runningByGroup.delete(groupId);
-        runningByUser.delete(initiatorId);
-    }
+async function safeSend(url, payload){
+try{
+const r = await axios.post(url, payload);
+return r.data.ok;
+}catch(e){
+if(e.response?.data?.parameters?.retry_after){
+await sleep(e.response.data.parameters.retry_after * 1000);
+return safeSend(url, payload);
+}
+return false;
+}
 }
 
-/* ---------------- SCENES (UNCHANGED CORE LOGIC) ---------------- */
-// (kept your logic same, only backend improved)
+/* ---------------- GLOBAL COMMAND FIX ---------------- */
+bot.use((ctx,next)=>{
+if(ctx.message?.text?.startsWith("/")){
+try{ ctx.scene.leave(); }catch{}
+}
+return next();
+});
 
-/* ---------------- BOT COMMANDS ---------------- */
-const stage = new Stage([]);
+/* ---------------- SCENES ---------------- */
+const broadcastScene = new BaseScene("broadcast");
+const serialScene = new BaseScene("serial");
+const urlScene = new BaseScene("url");
+const confirmScene = new BaseScene("confirm");
+
+/* -------- START -------- */
+broadcastScene.enter(ctx=>ctx.reply("Send group_id"));
+
+broadcastScene.on("message", async ctx=>{
+const groupId = ctx.message.text.trim();
+
+let resp;
+try{
+resp = await axios.get("https://broadcast-db.onrender.com/get-all.php?group_id=${groupId}");
+}catch{
+return ctx.reply("API failed.");
+}
+
+if(!resp.data.success || !resp.data.bots.length)
+return ctx.reply("No bots found.");
+
+ctx.session.flow = {
+groupId,
+bots: resp.data.bots
+};
+
+let msg = resp.data.bots.map((b,i)=>"${i+1}. ${b.name} (${b.users.length})").join("\n");
+msg += "\n\nSend serials like 1,2";
+
+ctx.reply(msg);
+ctx.scene.enter("serial");
+});
+
+/* -------- SERIAL -------- */
+serialScene.on("message", ctx=>{
+const txt = ctx.message.text.trim();
+
+if(txt.startsWith("/")){
+ctx.scene.leave();
+return ctx.reply("Exited.");
+}
+
+const nums = txt.split(",").map(x=>parseInt(x)).filter(x=>!isNaN(x));
+if(!nums.length) return ctx.reply("Invalid format.");
+
+ctx.session.flow.selected = nums.map(i=>i-1);
+
+ctx.reply("Send message URL");
+ctx.scene.enter("url");
+});
+
+/* -------- URL -------- */
+urlScene.on("message", ctx=>{
+const txt = ctx.message.text.trim();
+
+if(txt.startsWith("/")){
+ctx.scene.leave();
+return ctx.reply("Exited.");
+}
+
+const parsed = parseTgUrl(txt);
+if(!parsed) return ctx.reply("Invalid link.");
+
+ctx.session.flow.parsed = parsed;
+
+ctx.reply("Start broadcast?", Markup.inlineKeyboard([
+Markup.button.callback("Start","go")
+]));
+
+ctx.scene.enter("confirm");
+});
+
+/* -------- CONFIRM -------- */
+confirmScene.action("go", async ctx=>{
+const flow = ctx.session.flow;
+
+const selectedBots = flow.selected.map(i=>flow.bots[i]);
+
+const stats = { attempted:0, success:0, failed:0 };
+
+ctx.reply("Started.");
+
+for(const b of selectedBots){
+for(const user of b.users){
+stats.attempted++;
+
+  const ok = await safeSend(
+    `https://api.telegram.org/bot${b.bot_token}/forwardMessage`,
+    {
+      chat_id:user,
+      from_chat_id:flow.parsed.from_chat_id,
+      message_id:flow.parsed.message_id
+    }
+  );
+
+  if(ok) stats.success++;
+  else stats.failed++;
+
+  if(stats.attempted % 100 === 0){
+    ctx.telegram.sendMessage(ctx.from.id,
+      `Progress:\n${stats.attempted} sent\n${stats.success} success`
+    );
+  }
+}
+
+}
+
+ctx.reply(
+"Done\nSent: ${stats.attempted}\nSuccess: ${stats.success}\nFailed: ${stats.failed}"
+);
+
+ctx.scene.leave();
+});
+
+/* ---------------- SETUP ---------------- */
+const stage = new Stage([broadcastScene, serialScene, urlScene, confirmScene]);
 bot.use(session());
 bot.use(stage.middleware());
 
-bot.start(ctx => ctx.reply("Commands:\n/broadcast\n/kill\n/status"));
+bot.start(ctx=>ctx.reply("Use /broadcast"));
+bot.command("broadcast", ctx=>ctx.scene.enter("broadcast"));
 
-bot.command("kill", ctx => {
-    const uid = ctx.from.id;
-    const groupId = runningByUser.get(uid);
-
-    if (!groupId) return ctx.reply("No broadcast running.");
-
-    const binfo = runningByGroup.get(groupId);
-    if (!binfo) return ctx.reply("Cleaned.");
-
-    binfo.cancelled = true;
-    ctx.reply("Stopping broadcast...");
-});
-
-bot.command("status", ctx => {
-    const uid = ctx.from.id;
-    const groupId = runningByUser.get(uid);
-
-    if (!groupId) return ctx.reply("No broadcast running.");
-
-    const binfo = runningByGroup.get(groupId);
-
-    ctx.reply(
-        `Status:\nAttempted: ${binfo.stats.attempted}\nSuccess: ${binfo.stats.success}\nFailed: ${binfo.stats.failed}`
-    );
-});
-
-/* ---------------- START BOT ---------------- */
 bot.launch();
